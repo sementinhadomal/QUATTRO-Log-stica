@@ -4,8 +4,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Calendar, CreditCard, DollarSign, Target, TrendingUp, Package, Truck, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../stores/auth.store';
 import { formatCurrency } from '../../utils/format';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { api } from '../../services/api';
 import './HomePage.css';
 
@@ -18,7 +16,7 @@ const MOTIVATIONAL_PHRASES = [
 
 const HomePage = () => {
   const { user } = useAuth();
-  const [greeting, setGreeting] = useState('');
+  const [greeting, setGreeting] = useState('Bom dia');
   const [phrase, setPhrase] = useState('');
   
   useEffect(() => {
@@ -31,11 +29,15 @@ const HomePage = () => {
   }, []);
 
   // Fetch real statistics from database
-  const { data: homeData, isLoading } = useQuery({
+  const { data: homeData } = useQuery({
     queryKey: ['homeStats'],
     queryFn: async () => {
-      const res = await api.get('/dashboard/home');
-      return res.data;
+      try {
+        const res = await api.get('/dashboard/home');
+        return res.data;
+      } catch (e) {
+        return {};
+      }
     },
     refetchInterval: 15000,
   });
@@ -56,21 +58,33 @@ const HomePage = () => {
     inadimplentes: 0
   };
 
-  const chartData = homeData?.grafico7Dias || [];
-  const ranking = homeData?.rankingVendedores || [];
+  const chartData = Array.isArray(homeData?.grafico7Dias) ? homeData.grafico7Dias : [];
+  const ranking = Array.isArray(homeData?.rankingVendedores) ? homeData.rankingVendedores : [];
 
-  const todayFormatted = format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
+  let todayFormatted = '';
+  try {
+    todayFormatted = new Date().toLocaleDateString('pt-BR', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  } catch (e) {
+    todayFormatted = 'Hoje';
+  }
+
+  const capitalizedDate = todayFormatted ? todayFormatted.charAt(0).toUpperCase() + todayFormatted.slice(1) : '';
 
   return (
     <div className="home-container">
       {/* Header Greeting */}
       <div className="home-header">
         <div>
-          <h2>{greeting}, {user?.nome || 'Usuário'}!</h2>
-          <p className="home-date">{todayFormatted.charAt(0).toUpperCase() + todayFormatted.slice(1)}</p>
+          <h2>{greeting}, {user?.nome || user?.name || 'Usuário'}!</h2>
+          <p className="home-date">{capitalizedDate}</p>
         </div>
         <div className="motivational-card">
-          <p className="phrase">"{phrase}"</p>
+          <p className="phrase">"{phrase || MOTIVATIONAL_PHRASES[0]}"</p>
         </div>
       </div>
 
@@ -82,7 +96,7 @@ const HomePage = () => {
           </div>
           <div className="stat-info">
             <span className="stat-label">Agendamentos de Hoje</span>
-            <span className="stat-value">{stats.agendamentosHoje}</span>
+            <span className="stat-value">{stats?.agendamentosHoje || 0}</span>
           </div>
         </div>
 
@@ -92,7 +106,7 @@ const HomePage = () => {
           </div>
           <div className="stat-info">
             <span className="stat-label">Pagamentos de Hoje</span>
-            <span className="stat-value">{formatCurrency(stats.pagamentosHoje)}</span>
+            <span className="stat-value">{formatCurrency(stats?.pagamentosHoje || 0)}</span>
           </div>
         </div>
 
@@ -102,7 +116,7 @@ const HomePage = () => {
           </div>
           <div className="stat-info">
             <span className="stat-label">Gasto em Tráfego</span>
-            <span className="stat-value">{formatCurrency(stats.gastoTrafego)}</span>
+            <span className="stat-value">{formatCurrency(stats?.gastoTrafego || 0)}</span>
           </div>
         </div>
 
@@ -112,7 +126,7 @@ const HomePage = () => {
           </div>
           <div className="stat-info">
             <span className="stat-label">CPA Médio</span>
-            <span className="stat-value">{formatCurrency(stats.cpa)}</span>
+            <span className="stat-value">{formatCurrency(stats?.cpa || 0)}</span>
           </div>
         </div>
 
@@ -122,7 +136,7 @@ const HomePage = () => {
           </div>
           <div className="stat-info">
             <span className="stat-label">Ticket Médio</span>
-            <span className="stat-value">{formatCurrency(stats.ticketMedio)}</span>
+            <span className="stat-value">{formatCurrency(stats?.ticketMedio || 0)}</span>
           </div>
         </div>
 
@@ -132,7 +146,7 @@ const HomePage = () => {
           </div>
           <div className="stat-info">
             <span className="stat-label">Total de Pedidos</span>
-            <span className="stat-value">{stats.totalPedidos}</span>
+            <span className="stat-value">{stats?.totalPedidos || 0}</span>
           </div>
         </div>
       </div>
@@ -142,19 +156,19 @@ const HomePage = () => {
       <div className="situations-grid">
         <div className="situation-card">
           <Truck size={20} color="#7B5FF5" />
-          <span>A Caminho: <strong>{situations.aCaminho}</strong></span>
+          <span>A Caminho: <strong>{situations?.aCaminho || 0}</strong></span>
         </div>
         <div className="situation-card">
           <CreditCard size={20} color="#1A6B7A" />
-          <span>Aguardando Pagamento: <strong>{situations.aguardandoPagamento}</strong></span>
+          <span>Aguardando Pagamento: <strong>{situations?.aguardandoPagamento || 0}</strong></span>
         </div>
         <div className="situation-card">
           <Package size={20} color="#9B59B6" />
-          <span>Aguardando Retirada: <strong>{situations.aguardandoRetirada}</strong></span>
+          <span>Aguardando Retirada: <strong>{situations?.aguardandoRetirada || 0}</strong></span>
         </div>
         <div className="situation-card">
           <AlertTriangle size={20} color="#FF496C" />
-          <span>Inadimplentes: <strong>{situations.inadimplentes}</strong></span>
+          <span>Inadimplentes: <strong>{situations?.inadimplentes || 0}</strong></span>
         </div>
       </div>
 
@@ -190,10 +204,10 @@ const HomePage = () => {
                 <div key={seller.id || idx} className="ranking-item">
                   <span className="ranking-pos">#{idx + 1}</span>
                   <div className="ranking-details">
-                    <span className="ranking-name">{seller.nome || seller.name}</span>
-                    <span className="ranking-sales">{seller.vendas || seller.total_pedidos || 0} vendas</span>
+                    <span className="ranking-name">{seller?.nome || seller?.name || 'Vendedor'}</span>
+                    <span className="ranking-sales">{seller?.vendas || seller?.total_pedidos || 0} vendas</span>
                   </div>
-                  <span className="ranking-value">{formatCurrency(seller.valor || seller.total_valor || 0)}</span>
+                  <span className="ranking-value">{formatCurrency(seller?.valor || seller?.total_valor || 0)}</span>
                 </div>
               ))
             ) : (

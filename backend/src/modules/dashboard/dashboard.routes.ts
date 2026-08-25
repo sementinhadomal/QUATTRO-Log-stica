@@ -6,6 +6,7 @@ const router = Router();
 
 router.use(requireAuth);
 
+router.get('/home', dashboardController.getDashboardHomeCombined);
 router.get('/indicadores', dashboardController.getIndicators);
 router.get('/home-stats', dashboardController.getHomeStats);
 router.get('/chart-7-days', dashboardController.getChart7Days);
