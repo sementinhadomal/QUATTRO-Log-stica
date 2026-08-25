@@ -1,38 +1,54 @@
 export interface User {
   id: string;
-  name: string;
+  nome?: string;
+  name?: string;
   email: string;
-  role: 'admin' | 'manager' | 'seller' | 'driver';
-  status: 'active' | 'suspended';
+  funcao?: string;
+  role?: string;
+  ativo?: boolean;
+  status?: string;
   avatar?: string;
 }
 
 export interface Order {
   id: string;
-  code: string;
+  code?: string;
+  codigo?: string;
   status: OrderStatus;
-  value: number;
-  kit: string;
-  product: string;
-  client: Client;
-  sellerId: string;
-  sellerName: string;
-  date: string;
-  tags: string[];
+  value?: number;
+  valor?: number | string;
+  kit?: string;
+  kit_nome?: string;
+  product?: string;
+  produto_nome?: string;
+  client?: Client;
+  cliente_nome?: string;
+  cliente_telefone?: string;
+  sellerId?: string;
+  vendedor_id?: string;
+  sellerName?: string;
+  vendedor_nome?: string;
+  date?: string;
+  criado_em?: string;
+  tags?: string[];
+  etiquetas?: any[];
 }
 
 export interface Client {
   id: string;
-  name: string;
-  document: string; // CPF
-  phone: string;
+  nome?: string;
+  name?: string;
+  document?: string;
+  cpf?: string;
+  phone?: string;
+  telefone?: string;
   email?: string;
-  city?: string;
-  state?: string;
-  ordersCount: number;
-  totalPaid: number;
-  totalOpen: number;
-  lastPurchaseDate?: string;
+  cidade?: string;
+  uf?: string;
+  total_pedidos?: number;
+  total_pago?: number | string;
+  total_em_aberto?: number | string;
+  ultima_compra?: string | null;
 }
 
 export type OrderStatus =

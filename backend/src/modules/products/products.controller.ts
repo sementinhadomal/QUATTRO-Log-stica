@@ -5,7 +5,7 @@ import { logger } from '../../config/logger';
 export async function getProducts(req: Request, res: Response) {
   try {
     const result = await pool.query('SELECT * FROM products ORDER BY nome ASC');
-    const kitsRes = await pool.query('SELECT * FROM product_kits');
+    const kitsRes = await pool.query('SELECT * FROM kits WHERE ativo = TRUE ORDER BY ordem ASC');
     
     const products = result.rows.map(p => ({
       ...p,
@@ -23,27 +23,36 @@ export async function getKits(req: Request, res: Response) {
   try {
     const result = await pool.query(`
       SELECT k.*, p.nome as produto_nome 
-      FROM product_kits k
+      FROM kits k
       JOIN products p ON p.id = k.produto_id
-      ORDER BY p.nome ASC, k.quantidade ASC
+      WHERE k.ativo = TRUE
+      ORDER BY k.ordem ASC, k.quantidade ASC
     `);
     res.json(result.rows);
   } catch (error: any) {
+    logger.error('Error fetching kits:', error);
     res.status(500).json({ error: 'Erro ao buscar kits.' });
   }
 }
 
 export async function updateKit(req: Request, res: Response) {
   const { id } = req.params;
-  const { peso_kg, largura_cm, altura_cm, comprimento_cm, link_checkout_payt, preco_sugerido, badge_destaque } = req.body;
+  const { peso_kg, largura_cm, altura_cm, comprimento_cm, link_payt, preco, badge, ativo } = req.body;
 
   try {
     const result = await pool.query(
-      `UPDATE product_kits 
-       SET peso_kg = $1, largura_cm = $2, altura_cm = $3, comprimento_cm = $4, 
-           link_checkout_payt = $5, preco_sugerido = $6, badge_destaque = $7, atualizado_em = NOW()
-       WHERE id = $8 RETURNING *`,
-      [peso_kg, largura_cm, altura_cm, comprimento_cm, link_checkout_payt, preco_sugerido, badge_destaque, id]
+      `UPDATE kits 
+       SET peso_kg = COALESCE($1, peso_kg),
+           largura_cm = COALESCE($2, largura_cm),
+           altura_cm = COALESCE($3, altura_cm),
+           comprimento_cm = COALESCE($4, comprimento_cm),
+           link_payt = COALESCE($5, link_payt),
+           preco = COALESCE($6, preco),
+           badge = COALESCE($7, badge),
+           ativo = COALESCE($8, ativo),
+           atualizado_em = NOW()
+       WHERE id = $9 RETURNING *`,
+      [peso_kg, largura_cm, altura_cm, comprimento_cm, link_payt, preco, badge, ativo, id]
     );
 
     if (result.rowCount === 0) return res.status(404).json({ error: 'Kit não encontrado.' });
@@ -64,12 +73,12 @@ export async function getWhatsappChannels(req: Request, res: Response) {
 }
 
 export async function createWhatsappChannel(req: Request, res: Response) {
-  const { nome, numero, link_whatsapp, produto_id, ativo } = req.body;
+  const { nome, numero, ativo } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO whatsapp_channels (nome, numero, link_whatsapp, produto_id, ativo)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [nome, numero, link_whatsapp, produto_id, ativo ?? true]
+      `INSERT INTO whatsapp_channels (nome, numero, ativo)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [nome, numero, ativo ?? true]
     );
     res.status(201).json(result.rows[0]);
   } catch (error: any) {
@@ -80,13 +89,13 @@ export async function createWhatsappChannel(req: Request, res: Response) {
 
 export async function updateWhatsappChannel(req: Request, res: Response) {
   const { id } = req.params;
-  const { nome, numero, link_whatsapp, produto_id, ativo } = req.body;
+  const { nome, numero, ativo } = req.body;
   try {
     const result = await pool.query(
       `UPDATE whatsapp_channels 
-       SET nome = $1, numero = $2, link_whatsapp = $3, produto_id = $4, ativo = $5
-       WHERE id = $6 RETURNING *`,
-      [nome, numero, link_whatsapp, produto_id, ativo, id]
+       SET nome = $1, numero = $2, ativo = $3
+       WHERE id = $4 RETURNING *`,
+      [nome, numero, ativo, id]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Canal não encontrado.' });
     res.json(result.rows[0]);

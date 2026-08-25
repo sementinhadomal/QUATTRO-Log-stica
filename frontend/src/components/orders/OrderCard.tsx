@@ -9,6 +9,14 @@ interface OrderCardProps {
 }
 
 export const OrderCard: React.FC<OrderCardProps> = ({ order, onClick }) => {
+  const code = order.code || order.codigo || order.id;
+  const rawValue = order.value ?? (typeof order.valor === 'string' ? parseFloat(order.valor) : order.valor) ?? 0;
+  const clientName = order.client?.name || order.cliente_nome || 'Cliente';
+  const clientPhone = order.client?.phone || order.cliente_telefone || '';
+  const kitName = order.kit || order.kit_nome || 'QUATTRO 4-em-1';
+  const sellerName = order.sellerName || order.vendedor_nome || '—';
+  const orderDate = order.date || order.criado_em || '';
+
   return (
     <div 
       onClick={() => onClick && onClick(order)}
@@ -28,13 +36,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, onClick }) => {
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-        <span style={{ fontWeight: 600, color: '#1478FF' }}>{order.code}</span>
-        <span style={{ fontWeight: 600, color: '#16C784' }}>{formatCurrency(order.value)}</span>
+        <span style={{ fontWeight: 600, color: '#1478FF' }}>#{code}</span>
+        <span style={{ fontWeight: 600, color: '#16C784' }}>{formatCurrency(rawValue)}</span>
       </div>
       
       <div style={{ marginBottom: '0.75rem' }}>
-        <p style={{ fontWeight: 500, margin: '0 0 0.25rem 0' }}>{order.client.name}</p>
-        <p style={{ color: '#8FA3B8', fontSize: '0.875rem', margin: '0 0 0.25rem 0' }}>{formatPhone(order.client.phone)}</p>
+        <p style={{ fontWeight: 500, margin: '0 0 0.25rem 0' }}>{clientName}</p>
+        <p style={{ color: '#8FA3B8', fontSize: '0.875rem', margin: '0 0 0.25rem 0' }}>{formatPhone(clientPhone)}</p>
         <p style={{ 
           color: '#8FA3B8', 
           fontSize: '0.75rem', 
@@ -44,13 +52,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, onClick }) => {
           display: 'inline-block',
           margin: 0
         }}>
-          {order.kit}
+          {kitName}
         </p>
       </div>
       
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1C2A3A', paddingTop: '0.75rem' }}>
-        <span style={{ fontSize: '0.75rem', color: '#8FA3B8' }}>{order.sellerName}</span>
-        <span style={{ fontSize: '0.75rem', color: '#8FA3B8' }}>{formatDate(order.date)}</span>
+        <span style={{ fontSize: '0.75rem', color: '#8FA3B8' }}>{sellerName}</span>
+        <span style={{ fontSize: '0.75rem', color: '#8FA3B8' }}>{formatDate(orderDate)}</span>
       </div>
       
       <div style={{ marginTop: '0.75rem' }}>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Modal from '../ui/Modal';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
@@ -13,18 +13,41 @@ interface NewOrderModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+interface KitItem {
+  id: string;
+  nome: string;
+  preco: number | string;
+  badge?: string;
+  quantidade: number;
+}
+
+interface ChannelItem {
+  id: string;
+  nome: string;
+  numero: string;
+}
+
 export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange }) => {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [cpfLoading, setCpfLoading] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  // Form State
-  const [produto, setProduto] = useState('');
-  const [kit, setKit] = useState('');
+  // Products & Kits from API
+  const [kits, setKits] = useState<KitItem[]>([
+    { id: '1', nome: 'Kit com 2 sprays', preco: 347.00, quantidade: 2 },
+    { id: '2', nome: 'Kit com 3 sprays — Mais escolhido', preco: 497.00, badge: 'MAIS ESCOLHIDO', quantidade: 3 },
+    { id: '3', nome: 'Kit com 6 sprays — Melhor oferta', preco: 797.00, badge: 'MELHOR OFERTA', quantidade: 6 },
+  ]);
+  const [selectedKitId, setSelectedKitId] = useState('');
   const [valor, setValor] = useState(0);
 
+  // Channels
+  const [canais, setCanais] = useState<ChannelItem[]>([]);
+  const [canalId, setCanalId] = useState('');
+
+  // Form State
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
   const [cpf, setCpf] = useState('');
@@ -39,7 +62,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
   const [bairro, setBairro] = useState('');
   const [complemento, setComplemento] = useState('');
 
-  const [origem, setOrigem] = useState('');
   const [observacoes, setObservacoes] = useState('');
   
   const [termoFile, setTermoFile] = useState<File | null>(null);
@@ -49,33 +71,51 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
   const [showRecurringAlert, setShowRecurringAlert] = useState(false);
   const [recurringClientData, setRecurringClientData] = useState<any>(null);
 
-  // Mocks
-  const produtos = ['QUATTRO 4-em-1'];
-  const kits = [
-    { nome: '1 Pote', preco: 147 },
-    { nome: '2 Potes', preco: 247 },
-    { nome: '3 Potes', preco: 347 },
-  ];
-  const origens = ['WhatsApp 1', 'WhatsApp 2', 'Instagram', 'Indicação'];
+  // Load kits and channels on mount
+  useEffect(() => {
+    if (open) {
+      setErrorMessage('');
+      api.get('/produtos/kits').then(res => {
+        if (res.data && res.data.length > 0) {
+          setKits(res.data);
+        }
+      }).catch(() => {});
 
-  const handleKitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const selected = e.target.value;
-    setKit(selected);
-    const found = kits.find(k => k.nome === selected);
-    if (found) setValor(found.preco);
+      api.get('/produtos/canais-whatsapp').then(res => {
+        if (res.data) {
+          setCanais(res.data);
+        }
+      }).catch(() => {});
+    }
+  }, [open]);
+
+  const handleKitSelect = (kitId: string) => {
+    setSelectedKitId(kitId);
+    const found = kits.find(k => k.id === kitId);
+    if (found) {
+      setValor(typeof found.preco === 'string' ? parseFloat(found.preco) : found.preco);
+    }
   };
 
   const handleCpfBlur = async () => {
-    if (cpf.replace(/\D/g, '').length === 11) {
+    const rawCpf = cpf.replace(/\D/g, '');
+    if (rawCpf.length === 11) {
       setCpfLoading(true);
       try {
-        const response = await api.post('/integracoes/cpf', { cpf: cpf.replace(/\D/g, '') });
-        if (response.data.nome) setNome(response.data.nome);
-        
-        // Mocking check if client exists in DB
-        if (response.data.existsInDb) {
-          setRecurringClientData(response.data.clientData);
+        // First check if recurring client in internal DB
+        const checkRes = await api.get(`/pedidos/verificar-recorrente?cpf=${rawCpf}`);
+        if (checkRes.data && checkRes.data.recorrente) {
+          setRecurringClientData(checkRes.data);
           setShowRecurringAlert(true);
+          if (checkRes.data.cliente?.nome) {
+            setNome(checkRes.data.cliente.nome);
+          }
+        }
+
+        // Consult CPF API via backend proxy
+        const response = await api.post('/integracoes/cpf', { cpf: rawCpf });
+        if (response.data?.nome) {
+          setNome(response.data.nome);
         }
       } catch (err) {
         console.error('Erro ao buscar CPF', err);
@@ -86,15 +126,16 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
   };
 
   const handleCepBlur = async () => {
-    if (cep.replace(/\D/g, '').length === 8) {
+    const rawCep = cep.replace(/\D/g, '');
+    if (rawCep.length === 8) {
       setCepLoading(true);
       try {
-        const response = await api.get(`/integracoes/cep?cep=${cep.replace(/\D/g, '')}`);
-        if (response.data) {
+        const response = await api.get(`/integracoes/cep?cep=${rawCep}`);
+        if (response.data && response.data.encontrado) {
           setUf(response.data.uf || '');
-          setCidade(response.data.localidade || '');
+          setCidade(response.data.cidade || '');
           setBairro(response.data.bairro || '');
-          setRua(response.data.logradouro || '');
+          setRua(response.data.rua || '');
         }
       } catch (err) {
         console.error('Erro ao buscar CEP', err);
@@ -114,34 +155,99 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
     }
   };
 
+  const resetForm = () => {
+    setSelectedKitId('');
+    setValor(0);
+    setNome('');
+    setTelefone('');
+    setCpf('');
+    setEmail('');
+    setNoEmail(false);
+    setCep('');
+    setUf('');
+    setCidade('');
+    setRua('');
+    setNumero('');
+    setBairro('');
+    setComplemento('');
+    setCanalId('');
+    setObservacoes('');
+    setTermoFile(null);
+    setAgendamentoFiles([]);
+    setErrorMessage('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMessage('');
+
+    if (!selectedKitId) {
+      setErrorMessage('Por favor, selecione um Kit.');
+      return;
+    }
+
+    if (!termoFile) {
+      setErrorMessage('O upload do Termo de Compromisso é obrigatório.');
+      return;
+    }
+
     setIsLoading(true);
     
     try {
-      // Mocking submission
       const payload = {
-        produto, kit, valor,
-        cliente: { nome, telefone, cpf, email: noEmail ? null : email },
-        endereco: { cep, uf, cidade, rua, numero, bairro, complemento },
-        origem, observacoes
+        kitId: selectedKitId,
+        nome,
+        cpf,
+        telefone,
+        email: noEmail ? null : email,
+        semEmail: noEmail,
+        cep,
+        uf,
+        cidade,
+        rua,
+        numero,
+        bairro,
+        complemento,
+        canalId: canalId || null,
+        observacoes,
       };
       
       const { data } = await api.post('/pedidos', payload);
       
-      // Uploading files - mocked
-      if (termoFile || agendamentoFiles.length > 0) {
-        const formData = new FormData();
-        if (termoFile) formData.append('termo', termoFile);
-        agendamentoFiles.forEach((file, index) => formData.append(`agendamento_${index}`, file));
-        await api.post(`/pedidos/${data.id}/files`, formData);
+      // Upload evidence files if present
+      if (data.id && (termoFile || agendamentoFiles.length > 0)) {
+        try {
+          if (termoFile) {
+            const formData = new FormData();
+            formData.append('file', termoFile);
+            formData.append('tipo', 'termo');
+            formData.append('descricao', 'Termo de Compromisso');
+            await api.post(`/arquivos/evidencias/${data.id}`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+          }
+
+          for (const file of agendamentoFiles) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('tipo', 'print');
+            formData.append('descricao', 'Comprovante / Agendamento');
+            await api.post(`/arquivos/evidencias/${data.id}`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+          }
+        } catch (fileErr) {
+          console.warn('Erro ao enviar arquivos de evidência:', fileErr);
+        }
       }
 
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      resetForm();
       onOpenChange(false);
       
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao criar pedido', err);
+      setErrorMessage(err.response?.data?.error || 'Erro ao criar pedido. Tente novamente.');
     } finally {
       setIsLoading(false);
     }
@@ -149,90 +255,115 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
 
   return (
     <>
-      <Modal open={open} onOpenChange={onOpenChange} title="Novo Pedido" maxWidth="800px">
+      <Modal open={open} onOpenChange={onOpenChange} title="Novo Pedido — QUATTRO Logística" maxWidth="800px">
         <form onSubmit={handleSubmit}>
           
-          {/* SEÇÃO PRODUTO */}
+          {errorMessage && (
+            <div style={{ background: 'rgba(255, 73, 108, 0.15)', border: '1px solid #FF496C', color: '#FF496C', padding: '0.75rem 1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+              {errorMessage}
+            </div>
+          )}
+
+          {/* SEÇÃO PRODUTO & KITS */}
           <div style={{ marginBottom: '2rem' }}>
-            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem' }}>1. Produto</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Produto</label>
-                <select className="input-field" value={produto} onChange={e => setProduto(e.target.value)} required>
-                  <option value="">Selecione...</option>
-                  {produtos.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Kit</label>
-                <select className="input-field" value={kit} onChange={handleKitChange} required>
-                  <option value="">Selecione...</option>
-                  {kits.map(k => <option key={k.nome} value={k.nome}>{k.nome}</option>)}
-                </select>
+            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem', color: '#1478FF' }}>1. Produto & Kit</h4>
+            
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Produto</label>
+              <input className="input-field" value="QUATTRO 4-em-1" disabled style={{ background: '#070B12', color: '#F5F8FC' }} />
+            </div>
+
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Selecione o Kit *</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                {kits.map(k => {
+                  const kitPrice = typeof k.preco === 'string' ? parseFloat(k.preco) : k.preco;
+                  const isSelected = selectedKitId === k.id;
+                  return (
+                    <div 
+                      key={k.id}
+                      onClick={() => handleKitSelect(k.id)}
+                      style={{
+                        background: isSelected ? '#111A27' : '#0D131D',
+                        border: isSelected ? '2px solid #1478FF' : '1px solid #1C2A3A',
+                        borderRadius: '0.5rem',
+                        padding: '1rem',
+                        cursor: 'pointer',
+                        position: 'relative',
+                        transition: 'all 0.2s ease',
+                        boxShadow: isSelected ? '0 0 12px rgba(20, 120, 255, 0.3)' : 'none',
+                      }}
+                    >
+                      {k.badge && (
+                        <span style={{ position: 'absolute', top: '-10px', right: '10px', background: '#1478FF', color: '#FFF', fontSize: '0.65rem', fontWeight: 700, padding: '2px 8px', borderRadius: '10px', letterSpacing: '0.5px' }}>
+                          {k.badge}
+                        </span>
+                      )}
+                      <p style={{ fontWeight: 600, color: '#F5F8FC', marginBottom: '0.25rem', fontSize: '0.95rem' }}>{k.nome}</p>
+                      <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#16C784', margin: '0.5rem 0 0' }}>{formatCurrency(kitPrice)}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            {valor > 0 && (
-              <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ color: '#8FA3B8' }}>Valor do Kit:</span>
-                <span style={{ fontSize: '1.25rem', fontWeight: 600, color: '#16C784' }}>{formatCurrency(valor)}</span>
-              </div>
-            )}
           </div>
 
           {/* SEÇÃO CLIENTE */}
           <div style={{ marginBottom: '2rem' }}>
-            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem' }}>2. Cliente</h4>
+            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem', color: '#1478FF' }}>2. Cliente</h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div style={{ position: 'relative' }}>
-                <Input label="CPF" value={cpf} onChange={e => setCpf(e.target.value)} onBlur={handleCpfBlur} maskType="cpf" required placeholder="000.000.000-00" />
+                <Input label="CPF *" value={cpf} onChange={e => setCpf(e.target.value)} onBlur={handleCpfBlur} maskType="cpf" required placeholder="000.000.000-00" />
                 {cpfLoading && <Loader2 size={16} className="animate-spin" style={{ position: 'absolute', right: '1rem', top: '2.25rem', color: '#1478FF', animation: 'spin 1s linear infinite' }} />}
               </div>
-              <Input label="Telefone / WhatsApp" value={telefone} onChange={e => setTelefone(e.target.value)} maskType="phone" required placeholder="(00) 00000-0000" />
+              <Input label="Telefone / WhatsApp *" value={telefone} onChange={e => setTelefone(e.target.value)} maskType="phone" required placeholder="(00) 00000-0000" />
             </div>
-            <Input label="Nome Completo" value={nome} onChange={e => setNome(e.target.value)} required />
+            <Input label="Nome Completo *" value={nome} onChange={e => setNome(e.target.value)} required />
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '1rem' }}>
               <div style={{ flex: 1 }}>
-                <Input label="E-mail" type="email" value={email} onChange={e => setEmail(e.target.value)} disabled={noEmail} required={!noEmail} />
+                <Input label="E-mail" type="email" value={email} onChange={e => setEmail(e.target.value)} disabled={noEmail} required={!noEmail} placeholder="exemplo@email.com" />
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '0.5rem' }}>
-                <input type="checkbox" checked={noEmail} onChange={e => setNoEmail(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer' }} />
-                <span style={{ fontSize: '0.875rem' }}>Não tenho e-mail</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', marginTop: '1rem' }}>
+                <input type="checkbox" checked={noEmail} onChange={e => setNoEmail(e.target.checked)} style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#1478FF' }} />
+                <span style={{ fontSize: '0.875rem', color: '#8FA3B8' }}>Não tenho e-mail</span>
               </label>
             </div>
           </div>
 
           {/* SEÇÃO ENDEREÇO */}
           <div style={{ marginBottom: '2rem' }}>
-            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem' }}>3. Endereço</h4>
+            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem', color: '#1478FF' }}>3. Endereço de Entrega</h4>
             <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr 1fr', gap: '1rem' }}>
               <div style={{ position: 'relative' }}>
-                <Input label="CEP" value={cep} onChange={e => setCep(e.target.value)} onBlur={handleCepBlur} maskType="cep" required placeholder="00000-000" />
+                <Input label="CEP *" value={cep} onChange={e => setCep(e.target.value)} onBlur={handleCepBlur} maskType="cep" required placeholder="00000-000" />
                 {cepLoading && <Loader2 size={16} className="animate-spin" style={{ position: 'absolute', right: '1rem', top: '2.25rem', color: '#1478FF', animation: 'spin 1s linear infinite' }} />}
               </div>
-              <Input label="UF" value={uf} onChange={e => setUf(e.target.value)} required maxLength={2} />
-              <Input label="Cidade" value={cidade} onChange={e => setCidade(e.target.value)} required />
+              <Input label="UF *" value={uf} onChange={e => setUf(e.target.value)} required maxLength={2} placeholder="SP" />
+              <Input label="Cidade *" value={cidade} onChange={e => setCidade(e.target.value)} required placeholder="São Paulo" />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 100px', gap: '1rem' }}>
-              <Input label="Rua" value={rua} onChange={e => setRua(e.target.value)} required />
-              <Input label="Número" value={numero} onChange={e => setNumero(e.target.value)} required />
+              <Input label="Rua *" value={rua} onChange={e => setRua(e.target.value)} required placeholder="Av. Paulista" />
+              <Input label="Número *" value={numero} onChange={e => setNumero(e.target.value)} required placeholder="1000" />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <Input label="Bairro" value={bairro} onChange={e => setBairro(e.target.value)} required />
-              <Input label="Complemento" value={complemento} onChange={e => setComplemento(e.target.value)} />
+              <Input label="Bairro *" value={bairro} onChange={e => setBairro(e.target.value)} required placeholder="Bela Vista" />
+              <Input label="Complemento" value={complemento} onChange={e => setComplemento(e.target.value)} placeholder="Apto 42" />
             </div>
           </div>
 
           {/* SEÇÃO ORIGEM & OBSERVAÇÕES */}
           <div style={{ marginBottom: '2rem' }}>
-            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem' }}>4. Outros</h4>
-            <div style={{ marginBottom: '1rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>De qual WhatsApp veio o lead?</label>
-              <select className="input-field" value={origem} onChange={e => setOrigem(e.target.value)} required>
-                <option value="">Selecione...</option>
-                {origens.map(o => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </div>
+            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem', color: '#1478FF' }}>4. Origem & Observações</h4>
+            {canais.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>De qual WhatsApp veio o lead?</label>
+                <select className="input-field" value={canalId} onChange={e => setCanalId(e.target.value)}>
+                  <option value="">Selecione um canal...</option>
+                  {canais.map(c => <option key={c.id} value={c.id}>{c.nome} ({c.numero})</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Observações (Opcional)</label>
               <textarea 
@@ -240,51 +371,58 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
                 rows={3} 
                 value={observacoes} 
                 onChange={e => setObservacoes(e.target.value)}
+                placeholder="Preferências de horário de entrega, ponto de referência..."
                 style={{ resize: 'vertical' }}
               />
             </div>
           </div>
 
-          {/* SEÇÃO ARQUIVOS */}
+          {/* SEÇÃO EVIDÊNCIAS */}
           <div style={{ marginBottom: '2rem' }}>
-            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem' }}>5. Evidências</h4>
+            <h4 style={{ marginBottom: '1rem', borderBottom: '1px solid #1C2A3A', paddingBottom: '0.5rem', color: '#1478FF' }}>5. Evidências (Upload de Arquivos)</h4>
             
             <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Termo de Compromisso (Obrigatório)</label>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Termo de Compromisso (Obrigatório) *</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#111A27', padding: '0.5rem 1rem', border: '1px dashed #1C2A3A', borderRadius: '0.5rem', color: '#1478FF' }}>
-                  <Upload size={18} /> Selecionar Arquivo
+                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#111A27', padding: '0.65rem 1.25rem', border: '1px dashed #1478FF', borderRadius: '0.5rem', color: '#1478FF', fontWeight: 500 }}>
+                  <Upload size={18} /> Selecionar Imagem ou PDF
                   <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }} onChange={e => handleFileChange(e, true)} />
                 </label>
                 {termoFile && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(20, 120, 255, 0.1)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#F5F8FC' }}>{termoFile.name}</span>
-                    <button type="button" onClick={() => setTermoFile(null)} style={{ background: 'transparent', border: 'none', color: '#FF496C', cursor: 'pointer', display: 'flex' }}><X size={14} /></button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(20, 120, 255, 0.15)', border: '1px solid #1478FF', padding: '0.4rem 0.75rem', borderRadius: '0.4rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: '#F5F8FC' }}>{termoFile.name}</span>
+                    <button type="button" onClick={() => setTermoFile(null)} style={{ background: 'transparent', border: 'none', color: '#FF496C', cursor: 'pointer', display: 'flex' }}><X size={16} /></button>
                   </div>
                 )}
               </div>
             </div>
 
             <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Prints e Áudios (Opcional)</label>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#8FA3B8' }}>Prints e Áudios de Agendamento (Opcional)</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#111A27', padding: '0.5rem 1rem', border: '1px dashed #1C2A3A', borderRadius: '0.5rem', color: '#1478FF' }}>
+                <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#111A27', padding: '0.65rem 1.25rem', border: '1px dashed #1C2A3A', borderRadius: '0.5rem', color: '#8FA3B8' }}>
                   <Upload size={18} /> Adicionar Arquivos
                   <input type="file" multiple accept="image/*,application/pdf,audio/*" style={{ display: 'none' }} onChange={e => handleFileChange(e, false)} />
                 </label>
                 {agendamentoFiles.map((file, idx) => (
-                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.05)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#F5F8FC' }}>{file.name}</span>
-                    <button type="button" onClick={() => setAgendamentoFiles(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'transparent', border: 'none', color: '#FF496C', cursor: 'pointer', display: 'flex' }}><X size={14} /></button>
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255, 255, 255, 0.05)', padding: '0.4rem 0.75rem', borderRadius: '0.4rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: '#F5F8FC' }}>{file.name}</span>
+                    <button type="button" onClick={() => setAgendamentoFiles(prev => prev.filter((_, i) => i !== idx))} style={{ background: 'transparent', border: 'none', color: '#FF496C', cursor: 'pointer', display: 'flex' }}><X size={16} /></button>
                   </div>
                 ))}
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', borderTop: '1px solid #1C2A3A', paddingTop: '1.5rem' }}>
-            <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>Cancelar</Button>
-            <Button type="submit" variant="primary" isLoading={isLoading} disabled={!termoFile || valor === 0}>Criar Pedido</Button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1C2A3A', paddingTop: '1.5rem' }}>
+            <div>
+              <span style={{ color: '#8FA3B8', fontSize: '0.875rem' }}>Valor Total: </span>
+              <span style={{ fontSize: '1.5rem', fontWeight: 700, color: '#16C784', marginLeft: '0.5rem' }}>{formatCurrency(valor)}</span>
+            </div>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>Cancelar</Button>
+              <Button type="submit" variant="primary" isLoading={isLoading} disabled={!termoFile || !selectedKitId}>Criar Pedido</Button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -297,7 +435,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
           onContinue={() => setShowRecurringAlert(false)}
           onCancel={() => {
             setShowRecurringAlert(false);
-            onOpenChange(false); // Close main modal as well
+            onOpenChange(false);
           }}
         />
       )}
