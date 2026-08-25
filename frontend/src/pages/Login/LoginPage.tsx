@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../stores/auth.store';
+import { formatErrorString } from '../../utils/format';
 import './LoginPage.css';
 
 const LoginPage = () => {
@@ -50,7 +51,7 @@ const LoginPage = () => {
       setUser(loggedUser, token);
       navigate('/', { replace: true });
     } catch (err: any) {
-      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Erro ao realizar login. Verifique suas credenciais.';
+      const errMsg = formatErrorString(err.response?.data) || formatErrorString(err) || 'Erro ao realizar login. Verifique suas credenciais.';
       setError(errMsg);
     } finally {
       setIsLoading(false);
@@ -76,7 +77,7 @@ const LoginPage = () => {
           <p>Acesse sua conta para continuar</p>
         </div>
 
-        {error && <div className="login-error">{error}</div>}
+        {error && <div className="login-error">{formatErrorString(error)}</div>}
 
         <form onSubmit={handleLogin} className="login-form">
           <div className="form-group">

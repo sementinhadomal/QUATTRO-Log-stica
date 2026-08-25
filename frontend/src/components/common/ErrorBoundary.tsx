@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { formatErrorString } from '../../utils/format';
 
 interface Props {
   children: ReactNode;
@@ -6,7 +7,7 @@ interface Props {
 
 interface State {
   hasError: boolean;
-  error: Error | null;
+  error: any;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -15,16 +16,18 @@ export class ErrorBoundary extends Component<Props, State> {
     error: null,
   };
 
-  public static getDerivedStateFromError(error: Error): State {
+  public static getDerivedStateFromError(error: any): State {
     return { hasError: true, error };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  public componentDidCatch(error: any, errorInfo: ErrorInfo) {
     console.error('Uncaught error caught by ErrorBoundary:', error, errorInfo);
   }
 
   public render() {
     if (this.state.hasError) {
+      const errorMsg = formatErrorString(this.state.error);
+
       return (
         <div style={{
           minHeight: '100vh',
@@ -42,7 +45,7 @@ export class ErrorBoundary extends Component<Props, State> {
             Ops! Algo deu errado ao carregar este componente.
           </h2>
           <p style={{ color: '#8FA3B8', marginBottom: '1.5rem', maxWidth: '500px', fontSize: '0.875rem' }}>
-            {this.state.error?.message || 'Ocorreu um erro inesperado na interface.'}
+            {errorMsg || 'Ocorreu um erro inesperado na interface.'}
           </p>
           <button
             onClick={() => {

@@ -4,7 +4,7 @@ import Input from '../ui/Input';
 import Button from '../ui/Button';
 import RecurringClientAlert from './RecurringClientAlert';
 import { api } from '../../services/api';
-import { formatCurrency } from '../../utils/format';
+import { formatCurrency, formatErrorString } from '../../utils/format';
 import { Upload, X, Loader2 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -102,7 +102,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
     if (rawCpf.length === 11) {
       setCpfLoading(true);
       try {
-        // First check if recurring client in internal DB
         const checkRes = await api.get(`/pedidos/verificar-recorrente?cpf=${rawCpf}`);
         if (checkRes.data && checkRes.data.recorrente) {
           setRecurringClientData(checkRes.data);
@@ -112,7 +111,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
           }
         }
 
-        // Consult CPF API via backend proxy
         const response = await api.post('/integracoes/cpf', { cpf: rawCpf });
         if (response.data?.nome) {
           setNome(response.data.nome);
@@ -214,7 +212,6 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
       
       const { data } = await api.post('/pedidos', payload);
       
-      // Upload evidence files if present
       if (data.id && (termoFile || agendamentoFiles.length > 0)) {
         try {
           if (termoFile) {
@@ -247,7 +244,8 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
       
     } catch (err: any) {
       console.error('Erro ao criar pedido', err);
-      setErrorMessage(err.response?.data?.error || 'Erro ao criar pedido. Tente novamente.');
+      const msg = formatErrorString(err.response?.data) || formatErrorString(err) || 'Erro ao criar pedido. Tente novamente.';
+      setErrorMessage(msg);
     } finally {
       setIsLoading(false);
     }
@@ -260,7 +258,7 @@ export const NewOrderModal: React.FC<NewOrderModalProps> = ({ open, onOpenChange
           
           {errorMessage && (
             <div style={{ background: 'rgba(255, 73, 108, 0.15)', border: '1px solid #FF496C', color: '#FF496C', padding: '0.75rem 1rem', borderRadius: '0.5rem', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
-              {errorMessage}
+              {formatErrorString(errorMessage)}
             </div>
           )}
 

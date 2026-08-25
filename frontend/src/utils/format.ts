@@ -61,5 +61,24 @@ export const maskPhone = (phone: string | null | undefined): string => {
     .replace(/(-\d{4})\d+?$/, '$1');
 };
 
+export const formatErrorString = (err: any): string => {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    if (typeof err.error === 'string') return err.error;
+    if (typeof err.message === 'string') return err.message;
+    if (typeof err.error === 'object' && err.error !== null) {
+      if (typeof err.error.message === 'string') return err.error.message;
+      if (typeof err.error.error === 'string') return err.error.error;
+    }
+    try {
+      return JSON.stringify(err);
+    } catch (e) {
+      return 'Ocorreu um erro.';
+    }
+  }
+  return String(err);
+};
+
 export const formatCPF = maskCPF;
 export const formatPhone = maskPhone;
