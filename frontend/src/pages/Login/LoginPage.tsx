@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { api } from '../../services/api';
@@ -17,7 +17,13 @@ const LoginPage = () => {
   const [forgotMsg, setForgotMsg] = useState('');
   
   const navigate = useNavigate();
-  const { setUser } = useAuth();
+  const { user, setUser } = useAuth();
+
+  useEffect(() => {
+    if (user) {
+      navigate('/', { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +39,7 @@ const LoginPage = () => {
 
       const loggedUser = response.data.user || response.data;
       setUser(loggedUser);
-      navigate('/');
+      navigate('/', { replace: true });
     } catch (err: any) {
       const errMsg = err.response?.data?.error || err.response?.data?.message || 'Erro ao realizar login. Verifique suas credenciais.';
       setError(errMsg);

@@ -8,7 +8,11 @@ export const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const url = error.config?.url || '';
+    const isAuthRoute = url.includes('/auth/login') || url.includes('/auth/me');
+
+    if (error.response?.status === 401 && !isAuthRoute && window.location.pathname !== '/login') {
+      localStorage.removeItem('quattro_user');
       window.location.href = '/login';
     }
     return Promise.reject(error);

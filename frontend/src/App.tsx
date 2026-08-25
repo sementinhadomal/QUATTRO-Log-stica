@@ -19,19 +19,38 @@ import ProfilePage from './pages/Profile/ProfilePage';
 import OrderDetailPage from './pages/Orders/OrderDetailPage';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { user, isLoading, checkAuth } = useAuth();
+  const { user, isLoading } = useAuth();
   
-  useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
-  if (isLoading) return <div style={{ color: '#fff', padding: '20px' }}>Carregando...</div>;
-  if (!user) return <Navigate to="/login" replace />;
+  if (isLoading) {
+    return (
+      <div style={{ 
+        background: '#05070A', 
+        height: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        color: '#1478FF',
+        fontFamily: 'sans-serif' 
+      }}>
+        Carregando...
+      </div>
+    );
+  }
+  
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   return <>{children}</>;
 };
 
 function App() {
+  const { checkAuth } = useAuth();
+
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
