@@ -8,6 +8,38 @@ import { logger } from '../../config/logger';
 import { sendPasswordResetEmail } from './email.service';
 import { createAuditLog } from '../audit/audit.service';
 
+// ─── Ensure Admin Exists (Auto-seed helper) ──────────────────────────────────
+async function ensureAdminExists(client: any): Promise<any> {
+  const adminEmail = 'quattro@gmail.com';
+  const existing = await client.query(
+    'SELECT id, nome, email, senha_hash, funcao, ativo FROM users WHERE LOWER(email) = $1 AND deletado_em IS NULL',
+    [adminEmail]
+  );
+
+  if (existing.rows[0]) {
+    return existing.rows[0];
+  }
+
+  // Create default admin user
+  const senhaHash = await argon2.hash('Quattro123@', {
+    type: argon2.argon2id,
+    memoryCost: 65536,
+    timeCost: 3,
+    parallelism: 4,
+  });
+
+  const newAdminId = uuidv4();
+  const insertRes = await client.query(
+    `INSERT INTO users (id, nome, email, senha_hash, funcao, ativo)
+     VALUES ($1, $2, $3, $4, 'administrador', TRUE)
+     RETURNING id, nome, email, senha_hash, funcao, ativo`,
+    [newAdminId, 'Administrador QUATTRO', adminEmail, senhaHash]
+  );
+
+  logger.info('✅ Auto-created initial admin user: quattro@gmail.com');
+  return insertRes.rows[0];
+}
+
 // ─── Login ───────────────────────────────────────────────────────────────────
 export async function login(req: Request, res: Response): Promise<void> {
   const { email, senha } = req.body;
@@ -17,18 +49,28 @@ export async function login(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const cleanEmail = email.toLowerCase().trim();
+
   const client = await pool.connect();
   try {
-    const result = await client.query(
+    let result = await client.query(
       `SELECT id, nome, email, senha_hash, funcao, ativo, deletado_em
-       FROM users WHERE email = $1 AND deletado_em IS NULL`,
-      [email.toLowerCase().trim()]
+       FROM users WHERE LOWER(email) = $1 AND deletado_em IS NULL`,
+      [cleanEmail]
     );
 
-    const user = result.rows[0];
+    let user = result.rows[0];
+
+    // If logging in as default admin and admin doesn't exist in DB yet, auto-seed
+    if (!user && cleanEmail === 'quattro@gmail.com') {
+      try {
+        user = await ensureAdminExists(client);
+      } catch (seedErr) {
+        logger.warn('Failed to auto-seed admin on login:', seedErr);
+      }
+    }
 
     if (!user) {
-      // Use constant-time response to prevent timing attacks
       await argon2.hash('dummy_password_for_timing');
       res.status(401).json({ error: 'E-mail ou senha incorretos.' });
       return;
@@ -64,16 +106,15 @@ export async function login(req: Request, res: Response): Promise<void> {
       userAgent: req.get('User-Agent'),
     });
 
-    logger.info(`Login: ${user.email} [${user.funcao}]`);
-
     res.json({
-      user: {
-        id: user.id,
-        nome: user.nome,
-        email: user.email,
-        funcao: user.funcao,
-      },
+      id: user.id,
+      nome: user.nome,
+      email: user.email,
+      funcao: user.funcao,
     });
+  } catch (err: any) {
+    logger.error('Login error:', err);
+    res.status(500).json({ error: 'Erro interno ao realizar login.' });
   } finally {
     client.release();
   }
@@ -83,31 +124,28 @@ export async function login(req: Request, res: Response): Promise<void> {
 export async function logout(req: Request, res: Response): Promise<void> {
   const userId = (req.session as any).userId;
 
+  if (userId) {
+    await createAuditLog({
+      userId,
+      acao: 'logout',
+      tabela: 'users',
+      registroId: userId,
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+    });
+  }
+
   req.session.destroy((err) => {
     if (err) {
-      logger.error('Session destroy error:', err);
       res.status(500).json({ error: 'Erro ao encerrar sessão.' });
-      return;
+    } else {
+      res.clearCookie('quattro.sid');
+      res.json({ message: 'Sessão encerrada com sucesso.' });
     }
-
-    res.clearCookie('quattro.sid');
-
-    if (userId) {
-      createAuditLog({
-        userId,
-        acao: 'logout',
-        tabela: 'users',
-        registroId: userId,
-        ip: req.ip,
-        userAgent: req.get('User-Agent'),
-      }).catch(() => {});
-    }
-
-    res.json({ message: 'Sessão encerrada com sucesso.' });
   });
 }
 
-// ─── Get Current User ─────────────────────────────────────────────────────────
+// ─── Get Current User (Me) ───────────────────────────────────────────────────
 export async function getCurrentUser(req: Request, res: Response): Promise<void> {
   const userId = (req.session as any).userId;
 
@@ -119,27 +157,26 @@ export async function getCurrentUser(req: Request, res: Response): Promise<void>
   const client = await pool.connect();
   try {
     const result = await client.query(
-      `SELECT id, nome, email, funcao, departamento_id, ativo,
-              email_braip, link_payt_347, link_payt_497, link_payt_797,
-              comissao, ultimo_login, criado_em
+      `SELECT id, nome, email, funcao, ativo, email_braip, link_payt_347, link_payt_497, link_payt_797, criado_em, ultimo_login
        FROM users WHERE id = $1 AND deletado_em IS NULL`,
       [userId]
     );
 
     const user = result.rows[0];
-    if (!user || !user.ativo) {
-      req.session.destroy(() => {});
-      res.status(401).json({ error: 'Sessão inválida.' });
+    if (!user) {
+      res.status(401).json({ error: 'Usuário não encontrado.' });
       return;
     }
 
-    res.json({ user });
+    res.json(user);
   } finally {
     client.release();
   }
 }
 
-// ─── Request Password Reset ───────────────────────────────────────────────────
+export const me = getCurrentUser;
+
+// ─── Recover Password (Send Email) ───────────────────────────────────────────
 export async function requestPasswordReset(req: Request, res: Response): Promise<void> {
   const { email } = req.body;
 
@@ -148,49 +185,56 @@ export async function requestPasswordReset(req: Request, res: Response): Promise
     return;
   }
 
+  const cleanEmail = email.toLowerCase().trim();
+
   const client = await pool.connect();
   try {
     const result = await client.query(
-      'SELECT id, nome, email FROM users WHERE email = $1 AND deletado_em IS NULL AND ativo = TRUE',
-      [email.toLowerCase().trim()]
+      'SELECT id, nome FROM users WHERE LOWER(email) = $1 AND ativo = TRUE AND deletado_em IS NULL',
+      [cleanEmail]
     );
-
-    // Always return success to prevent email enumeration
-    if (!result.rows[0]) {
-      res.json({ message: 'Se este e-mail estiver cadastrado, você receberá as instruções.' });
-      return;
-    }
 
     const user = result.rows[0];
 
-    // Generate secure token
-    const token = crypto.randomBytes(32).toString('hex');
-    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    const expiraEm = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    // Always respond with success to prevent email enumeration
+    if (!user) {
+      res.json({ message: 'Se o e-mail estiver cadastrado, você receberá um link de recuperação.' });
+      return;
+    }
 
-    // Invalidate old tokens
-    await client.query(
-      "UPDATE password_resets SET usado = TRUE WHERE user_id = $1 AND usado = FALSE",
-      [user.id]
-    );
+    // Generate token
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
     await client.query(
-      `INSERT INTO password_resets (id, user_id, token_hash, expira_em)
+      `INSERT INTO password_reset_tokens (id, user_id, token_hash, expiracao)
        VALUES ($1, $2, $3, $4)`,
-      [uuidv4(), user.id, tokenHash, expiraEm]
+      [uuidv4(), user.id, hashedToken, expiresAt]
     );
 
     // Send email (non-blocking)
-    sendPasswordResetEmail(user.email, user.nome, token).catch((err) => {
-      logger.error('Failed to send password reset email:', err.message);
+    const resetUrl = `${env.FRONTEND_URL}/redefinir-senha?token=${rawToken}`;
+    sendPasswordResetEmail(cleanEmail, user.nome, resetUrl).catch((err) =>
+      logger.warn('Password reset email failed:', err.message)
+    );
+
+    await createAuditLog({
+      userId: user.id,
+      acao: 'recuperacao_senha_solicitada',
+      tabela: 'users',
+      registroId: user.id,
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
     });
 
-    logger.info(`Password reset requested for: ${user.email}`);
-    res.json({ message: 'Se este e-mail estiver cadastrado, você receberá as instruções.' });
+    res.json({ message: 'Se o e-mail estiver cadastrado, você receberá um link de recuperação.' });
   } finally {
     client.release();
   }
 }
+
+export const recoverPassword = requestPasswordReset;
 
 // ─── Reset Password ──────────────────────────────────────────────────────────
 export async function resetPassword(req: Request, res: Response): Promise<void> {
@@ -202,23 +246,24 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
   }
 
   if (novaSenha.length < 8) {
-    res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres.' });
+    res.status(400).json({ error: 'A nova senha deve ter no mínimo 8 caracteres.' });
     return;
   }
 
-  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-  const client = await pool.connect();
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
+  const client = await pool.connect();
   try {
-    const result = await client.query(
-      `SELECT pr.id, pr.user_id, pr.expira_em, pr.usado
-       FROM password_resets pr
-       WHERE pr.token_hash = $1 AND pr.usado = FALSE AND pr.expira_em > NOW()`,
-      [tokenHash]
+    await client.query('BEGIN');
+
+    const tokenResult = await client.query(
+      `SELECT id, user_id FROM password_reset_tokens
+       WHERE token_hash = $1 AND usado = FALSE AND expiracao > NOW()`,
+      [hashedToken]
     );
 
-    const reset = result.rows[0];
-    if (!reset) {
+    const resetToken = tokenResult.rows[0];
+    if (!resetToken) {
       res.status(400).json({ error: 'Token inválido ou expirado.' });
       return;
     }
@@ -230,37 +275,36 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
       parallelism: 4,
     });
 
-    await client.query('BEGIN');
-
+    // Update user password
     await client.query(
       'UPDATE users SET senha_hash = $1, atualizado_em = NOW() WHERE id = $2',
-      [novaSenhaHash, reset.user_id]
+      [novaSenhaHash, resetToken.user_id]
     );
 
+    // Mark token as used
     await client.query(
-      'UPDATE password_resets SET usado = TRUE WHERE id = $1',
-      [reset.id]
+      'UPDATE password_reset_tokens SET usado = TRUE WHERE id = $1',
+      [resetToken.id]
     );
 
-    // Invalidate all sessions for this user (force re-login)
+    // Invalidate all active sessions for this user
     await client.query(
       `DELETE FROM sessions WHERE sess::jsonb->>'userId' = $1`,
-      [reset.user_id]
+      [resetToken.user_id]
     );
 
     await client.query('COMMIT');
 
     await createAuditLog({
-      userId: reset.user_id,
+      userId: resetToken.user_id,
       acao: 'senha_redefinida',
       tabela: 'users',
-      registroId: reset.user_id,
+      registroId: resetToken.user_id,
       ip: req.ip,
       userAgent: req.get('User-Agent'),
     });
 
-    logger.info(`Password reset completed for user: ${reset.user_id}`);
-    res.json({ message: 'Senha redefinida com sucesso.' });
+    res.json({ message: 'Senha redefinida com sucesso. Faça login com sua nova senha.' });
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -269,7 +313,7 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
   }
 }
 
-// ─── Change Password ─────────────────────────────────────────────────────────
+// ─── Change Password (Authenticated) ─────────────────────────────────────────
 export async function changePassword(req: Request, res: Response): Promise<void> {
   const userId = (req.session as any).userId;
   const { senhaAtual, novaSenha } = req.body;
@@ -280,18 +324,18 @@ export async function changePassword(req: Request, res: Response): Promise<void>
   }
 
   if (novaSenha.length < 8) {
-    res.status(400).json({ error: 'A nova senha deve ter pelo menos 8 caracteres.' });
+    res.status(400).json({ error: 'A nova senha deve ter no mínimo 8 caracteres.' });
     return;
   }
 
   const client = await pool.connect();
   try {
-    const result = await client.query(
-      'SELECT senha_hash FROM users WHERE id = $1',
+    const userResult = await client.query(
+      'SELECT senha_hash FROM users WHERE id = $1 AND deletado_em IS NULL',
       [userId]
     );
 
-    const user = result.rows[0];
+    const user = userResult.rows[0];
     if (!user) {
       res.status(404).json({ error: 'Usuário não encontrado.' });
       return;
@@ -315,12 +359,6 @@ export async function changePassword(req: Request, res: Response): Promise<void>
       [novaSenhaHash, userId]
     );
 
-    // Invalidate all other sessions
-    await client.query(
-      `DELETE FROM sessions WHERE sid != $1 AND sess::jsonb->>'userId' = $2`,
-      [req.sessionID, userId]
-    );
-
     await createAuditLog({
       userId,
       acao: 'senha_alterada',
@@ -336,40 +374,17 @@ export async function changePassword(req: Request, res: Response): Promise<void>
   }
 }
 
-// ─── Terminate All Sessions ───────────────────────────────────────────────────
+// ─── Terminate All Sessions ──────────────────────────────────────────────────
 export async function terminateAllSessions(req: Request, res: Response): Promise<void> {
-  const userId = (req.session as any).userId;
-  const { targetUserId } = req.params;
-  const sessionRole = (req.session as any).userRole;
-
-  const idToTerminate = targetUserId || userId;
-
-  // Only admin can terminate other users' sessions
-  if (targetUserId && targetUserId !== userId && sessionRole !== 'administrador') {
-    res.status(403).json({ error: 'Sem permissão para encerrar sessões de outros usuários.' });
-    return;
-  }
+  const currentUserId = (req.session as any).userId;
+  const targetUserId = req.params.targetUserId || currentUserId;
 
   const client = await pool.connect();
   try {
     await client.query(
       `DELETE FROM sessions WHERE sess::jsonb->>'userId' = $1`,
-      [idToTerminate]
+      [targetUserId]
     );
-
-    if (idToTerminate === userId) {
-      req.session.destroy(() => {});
-      res.clearCookie('quattro.sid');
-    }
-
-    await createAuditLog({
-      userId,
-      acao: 'sessoes_encerradas',
-      tabela: 'users',
-      registroId: idToTerminate,
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-    });
 
     res.json({ message: 'Todas as sessões foram encerradas.' });
   } finally {
