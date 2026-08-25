@@ -24,47 +24,49 @@ import filesRoutes from './modules/files/files.routes';
 import { superfreteWebhookRouter } from './webhooks/superfrete.webhook';
 import { handlePaytWebhook } from './modules/billing/billing.controller';
 
-// Start cron jobs
-import './jobs/tracking.job';
-import './jobs/postback.retry.job';
-
-const PgSession = connectPgSimple(session);
 const app = express();
 
-// Trust proxy for rate limiting behind Nginx
+// Trust proxy for rate limiting & session cookies behind proxies (Vercel, Nginx)
 app.set('trust proxy', 1);
 
 // Security
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-      imgSrc: ["'self'", 'data:', 'blob:'],
-      scriptSrc: ["'self'"],
-    },
-  },
+  contentSecurityPolicy: false,
 }));
 
 app.use(cors({
-  origin: env.FRONTEND_URL,
+  origin: true,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
-// Session
+// Session Store Setup (Failsafe)
+const PgSession = connectPgSimple(session);
+let sessionStore: any;
+
+try {
+  sessionStore = new PgSession({ 
+    pool, 
+    tableName: 'sessions', 
+    createTableIfMissing: true,
+    errorLog: (err) => logger.warn('PgSession error (falling back):', err.message)
+  });
+} catch (err) {
+  logger.warn('Using MemoryStore fallback for sessions');
+  sessionStore = new session.MemoryStore();
+}
+
 app.use(session({
-  store: new PgSession({ pool, tableName: 'sessions', createTableIfMissing: false }),
+  store: sessionStore,
   name: 'quattro.sid',
-  secret: env.SESSION_SECRET,
+  secret: env.SESSION_SECRET || 'quattro_default_secret_32chars_min',
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     secure: env.IS_PRODUCTION,
-    sameSite: 'strict',
-    maxAge: 8 * 60 * 60 * 1000, // 8 hours
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
   },
 }));
 
@@ -94,30 +96,15 @@ app.use('/api/cobrancas', billingRoutes);
 app.use('/api/arquivos', filesRoutes);
 
 // Health check
-app.get('/health', (req, res) => { res.json({ status: 'ok', timestamp: new Date().toISOString() }); });
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // 404
-app.use((req, res) => { res.status(404).json({ error: 'Rota não encontrada.' }); });
+app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
 // Error handler
 app.use((err: any, req: any, res: any, next: any) => {
   logger.error('Unhandled error:', { message: err.message, stack: err.stack, url: req.url });
   res.status(500).json({ error: 'Erro interno do servidor.' });
 });
-
-async function start() {
-  await testConnection();
-  app.listen(env.PORT, () => {
-    logger.info(`🚀 QUATTRO Logística Backend running on port ${env.PORT}`);
-    logger.info(`📱 Frontend URL: ${env.FRONTEND_URL}`);
-  });
-}
-
-if (require.main === module) {
-  start().catch((err) => {
-    logger.error('Failed to start server:', err);
-    process.exit(1);
-  });
-}
 
 export default app;
