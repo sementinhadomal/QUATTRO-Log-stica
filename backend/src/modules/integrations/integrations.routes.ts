@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { queryCPF, queryCEP } from './integrations.controller';
+import { queryCPF, queryCEP, queryRastreio } from './integrations.controller';
 import { requireAuth } from '../../middleware/requireAuth';
 import { superfrete } from './superfrete.service';
 import { getIntegrationsStatus, testIntegration } from './integrations.status';
@@ -14,6 +14,10 @@ router.post('/cpf', queryCPF);
 
 // CEP lookup (backend proxy)
 router.get('/cep', queryCEP);
+
+// Rastreio lookup (custom Fullativo tracking API proxy)
+router.get('/rastreio', queryRastreio);
+router.post('/rastreio', queryRastreio);
 
 // Integration status dashboard
 router.get('/status', getIntegrationsStatus);

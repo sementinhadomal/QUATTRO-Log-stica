@@ -43,7 +43,6 @@ export async function queryCPF(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Check if CPF_API_TOKEN is configured
   if (!env.CPF_API_TOKEN) {
     res.status(503).json({
       error: 'API de CPF não configurada.',
@@ -55,12 +54,10 @@ export async function queryCPF(req: Request, res: Response): Promise<void> {
 
   try {
     const url = `${env.CPF_API_BASE_URL}`;
-    
-    // NEVER expose the token to the browser — call from backend only
     const response = await axios.get(url, {
       params: {
         documento: cpfNums,
-        token: env.CPF_API_TOKEN, // Token only in backend
+        token: env.CPF_API_TOKEN,
       },
       timeout: 8000,
       validateStatus: () => true,
@@ -68,9 +65,6 @@ export async function queryCPF(req: Request, res: Response): Promise<void> {
 
     if (response.status === 200 && response.data) {
       const data = response.data;
-
-      // Map the real API response fields
-      // Testing the actual API response format and mapping accordingly
       const nome = data.nome || data.name || data.nomeCompleto || null;
       const situacao = data.situacao || data.status || null;
 
@@ -79,52 +73,22 @@ export async function queryCPF(req: Request, res: Response): Promise<void> {
         nome: nome || null,
         situacao: situacao || null,
         encontrado: !!nome,
-        dados: {
-          cpf: cpfNums,
-          nome: nome,
-        },
-      });
-    } else if (response.status === 404 || response.status === 204) {
-      res.json({
-        cpfValido: true,
-        encontrado: false,
-        nome: null,
-      });
-    } else if (response.status === 429) {
-      res.status(429).json({
-        error: 'Limite de consultas de CPF atingido.',
-        cpfValido: true,
-        fallback: true,
+        dados: { cpf: cpfNums, nome },
       });
     } else {
-      logger.warn(`CPF API returned status ${response.status}`);
       res.json({
         cpfValido: true,
         encontrado: false,
         nome: null,
-        aviso: 'API de CPF indisponível. Dados não verificados.',
         fallback: true,
       });
     }
   } catch (err: any) {
-    if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
-      logger.warn('CPF API timeout');
-      res.json({
-        cpfValido: true,
-        encontrado: false,
-        nome: null,
-        aviso: 'API de CPF indisponível no momento. Você pode continuar com a validação matemática.',
-        fallback: true,
-      });
-      return;
-    }
-
-    logger.warn('CPF API error (token not logged):', err.message);
+    logger.warn('CPF API error:', err.message);
     res.json({
       cpfValido: true,
       encontrado: false,
       nome: null,
-      aviso: 'API de CPF indisponível. Continuando com validação matemática.',
       fallback: true,
     });
   }
@@ -146,7 +110,6 @@ export async function queryCEP(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // Try primary CEP API
   try {
     const url = env.CEP_API_BASE_URL;
     const response = await axios.get(url, {
@@ -157,8 +120,6 @@ export async function queryCEP(req: Request, res: Response): Promise<void> {
 
     if (response.status === 200 && response.data && !response.data.erro) {
       const data = response.data;
-
-      // Map real API response (tested against actual endpoint)
       const endereco = {
         cep: cepNums,
         uf: data.uf || data.estado || '',
@@ -176,31 +137,72 @@ export async function queryCEP(req: Request, res: Response): Promise<void> {
     logger.warn('Primary CEP API error:', err.message);
   }
 
-  // Fallback: ViaCEP
-  if (env.VIACEP_FALLBACK) {
-    try {
-      const viacepResponse = await axios.get(
-        `https://viacep.com.br/ws/${cepNums}/json/`,
-        { timeout: 5000, validateStatus: () => true }
-      );
+  // Fallback ViaCEP
+  try {
+    const viacepResponse = await axios.get(
+      `https://viacep.com.br/ws/${cepNums}/json/`,
+      { timeout: 5000, validateStatus: () => true }
+    );
 
-      if (viacepResponse.status === 200 && !viacepResponse.data.erro) {
-        const v = viacepResponse.data;
-        res.json({
-          encontrado: true,
-          cep: cepNums,
-          uf: v.uf || '',
-          cidade: v.localidade || '',
-          rua: v.logradouro || '',
-          bairro: v.bairro || '',
-          fonte: 'viacep',
-        });
-        return;
-      }
-    } catch (err: any) {
-      logger.warn('ViaCEP fallback error:', err.message);
+    if (viacepResponse.status === 200 && !viacepResponse.data.erro) {
+      const v = viacepResponse.data;
+      res.json({
+        encontrado: true,
+        cep: cepNums,
+        uf: v.uf || '',
+        cidade: v.localidade || '',
+        rua: v.logradouro || '',
+        bairro: v.bairro || '',
+        fonte: 'viacep',
+      });
+      return;
     }
+  } catch (err: any) {
+    logger.warn('ViaCEP fallback error:', err.message);
   }
 
   res.status(404).json({ error: 'CEP não encontrado.', encontrado: false });
+}
+
+// ─── Rastreio Query Endpoint (API Fullativo Rastreio) ────────────────────────
+export async function queryRastreio(req: Request, res: Response): Promise<void> {
+  const codigo = (req.query.codigo || req.body?.codigo) as string;
+
+  if (!codigo) {
+    res.status(400).json({ error: 'Código de rastreio é obrigatório.' });
+    return;
+  }
+
+  const cleanCodigo = codigo.trim().toUpperCase();
+
+  try {
+    const trackingUrl = `https://base2.sistemafullativo.online:80/api/rastreio?codigo=${encodeURIComponent(cleanCodigo)}`;
+    
+    const response = await axios.get(trackingUrl, {
+      timeout: 10000,
+      validateStatus: () => true,
+    });
+
+    if (response.status === 200 && response.data) {
+      res.json({
+        codigo: cleanCodigo,
+        encontrado: true,
+        urlConsulta: trackingUrl,
+        rastreio: response.data,
+      });
+    } else {
+      res.status(response.status).json({
+        codigo: cleanCodigo,
+        encontrado: false,
+        error: 'Rastreio não localizado na API oficial.',
+      });
+    }
+  } catch (err: any) {
+    logger.warn(`Erro ao consultar API de rastreio para o código ${cleanCodigo}:`, err.message);
+    res.status(500).json({
+      codigo: cleanCodigo,
+      encontrado: false,
+      error: 'Erro de conexão com o serviço de rastreamento.',
+    });
+  }
 }
