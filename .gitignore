@@ -1,0 +1,27 @@
+# Node modules & build outputs
+node_modules/
+dist/
+build/
+.output/
+
+# Environment files (NEVER commit secrets)
+.env
+.env.*
+!.env.example
+
+# Uploads & local media (except keep files)
+uploads/*
+!uploads/.gitkeep
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.tsbuildinfo

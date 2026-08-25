@@ -1,0 +1,179 @@
+import { Request, Response } from 'express';
+import crypto from 'crypto';
+import fs from 'fs';
+import { pool } from '../../config/database';
+import { logger } from '../../config/logger';
+import { env } from '../../config/env';
+
+export async function uploadEvidence(req: Request, res: Response) {
+  const { orderId } = req.params;
+  const file = req.file;
+
+  if (!file) {
+    return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const fileInsert = await client.query(
+      `INSERT INTO files (nome_original, nome_arquivo, caminho, tipo_mime, tamanho)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [file.originalname, file.filename, file.path, file.mimetype, file.size]
+    );
+
+    const fileId = fileInsert.rows[0].id;
+
+    const evidenceInsert = await client.query(
+      `INSERT INTO evidences (pedido_id, arquivo_id, criado_por)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [orderId, fileId, (req.session as any).userId]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ id: evidenceInsert.rows[0].id, fileId, message: 'Evidência salva com sucesso.' });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    logger.error('Error uploading evidence', { error: error.message });
+    res.status(500).json({ error: 'Erro interno ao salvar evidência.' });
+  } finally {
+    client.release();
+  }
+}
+
+export async function uploadTerm(req: Request, res: Response) {
+  const { orderId } = req.params;
+  const file = req.file;
+
+  if (!file) {
+    return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const fileInsert = await client.query(
+      `INSERT INTO files (nome_original, nome_arquivo, caminho, tipo_mime, tamanho)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [file.originalname, file.filename, file.path, file.mimetype, file.size]
+    );
+
+    const fileId = fileInsert.rows[0].id;
+
+    await client.query(
+      `UPDATE orders SET termo_arquivo_id = $1 WHERE id = $2`,
+      [fileId, orderId]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({ fileId, message: 'Termo salvo com sucesso.' });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    logger.error('Error uploading term', { error: error.message });
+    res.status(500).json({ error: 'Erro interno ao salvar termo.' });
+  } finally {
+    client.release();
+  }
+}
+
+export async function getFileUrl(req: Request, res: Response) {
+  const { fileId } = req.params;
+  const expiry = Date.now() + 60 * 60 * 1000; // 60 minutes
+
+  try {
+    const fileRes = await pool.query('SELECT id FROM files WHERE id = $1', [fileId]);
+    if (fileRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Arquivo não encontrado.' });
+    }
+
+    const token = crypto.createHmac('sha256', env.SESSION_SECRET)
+      .update(`${fileId}:${expiry}`)
+      .digest('hex');
+
+    const url = `/api/arquivos/download?fileId=${fileId}&expiry=${expiry}&token=${token}`;
+    res.json({ url });
+  } catch (error: any) {
+    logger.error('Error generating file URL', { error: error.message });
+    res.status(500).json({ error: 'Erro ao gerar URL.' });
+  }
+}
+
+export async function serveFile(req: Request, res: Response) {
+  const { fileId, expiry, token } = req.query;
+
+  if (!fileId || !expiry || !token) {
+    return res.status(400).json({ error: 'Parâmetros inválidos.' });
+  }
+
+  if (Date.now() > Number(expiry)) {
+    return res.status(403).json({ error: 'Link expirado.' });
+  }
+
+  const expectedToken = crypto.createHmac('sha256', env.SESSION_SECRET)
+    .update(`${fileId}:${expiry}`)
+    .digest('hex');
+
+  if (token !== expectedToken) {
+    return res.status(403).json({ error: 'Token inválido.' });
+  }
+
+  try {
+    const fileRes = await pool.query('SELECT caminho, tipo_mime, nome_original FROM files WHERE id = $1', [fileId]);
+    if (fileRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Arquivo não encontrado no banco.' });
+    }
+
+    const { caminho, tipo_mime, nome_original } = fileRes.rows[0];
+
+    if (!fs.existsSync(caminho)) {
+      return res.status(404).json({ error: 'Arquivo não encontrado no disco.' });
+    }
+
+    res.setHeader('Content-Type', tipo_mime);
+    res.setHeader('Content-Disposition', `inline; filename="${nome_original}"`);
+    fs.createReadStream(caminho).pipe(res);
+  } catch (error: any) {
+    logger.error('Error serving file', { error: error.message });
+    res.status(500).json({ error: 'Erro ao servir o arquivo.' });
+  }
+}
+
+export async function deleteFile(req: Request, res: Response) {
+  const { id } = req.params; // ID of the evidence
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const evRes = await client.query('SELECT arquivo_id FROM evidences WHERE id = $1', [id]);
+    if (evRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Evidência não encontrada.' });
+    }
+
+    const fileId = evRes.rows[0].arquivo_id;
+
+    const fileRes = await client.query('SELECT caminho FROM files WHERE id = $1', [fileId]);
+    
+    await client.query('DELETE FROM evidences WHERE id = $1', [id]);
+    await client.query('DELETE FROM files WHERE id = $1', [fileId]);
+
+    if (fileRes.rowCount && fileRes.rowCount > 0) {
+      const caminho = fileRes.rows[0].caminho;
+      if (fs.existsSync(caminho)) {
+        fs.unlinkSync(caminho);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ message: 'Arquivo deletado com sucesso.' });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    logger.error('Error deleting file', { error: error.message });
+    res.status(500).json({ error: 'Erro ao deletar arquivo.' });
+  } finally {
+    client.release();
+  }
+}
