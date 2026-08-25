@@ -5,7 +5,7 @@ import { api } from '../services/api';
 interface AuthState {
   user: User | null;
   isLoading: boolean;
-  setUser: (user: User | null) => void;
+  setUser: (user: User | null, token?: string) => void;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
 }
@@ -22,11 +22,14 @@ const getInitialUser = (): User | null => {
 export const useAuth = create<AuthState>((set) => ({
   user: getInitialUser(),
   isLoading: false,
-  setUser: (user) => {
+  setUser: (user, token) => {
     if (user) {
       localStorage.setItem('quattro_user', JSON.stringify(user));
     } else {
       localStorage.removeItem('quattro_user');
+    }
+    if (token) {
+      localStorage.setItem('quattro_token', token);
     }
     set({ user, isLoading: false });
   },
@@ -37,6 +40,7 @@ export const useAuth = create<AuthState>((set) => ({
       console.error('Logout error', error);
     } finally {
       localStorage.removeItem('quattro_user');
+      localStorage.removeItem('quattro_token');
       set({ user: null, isLoading: false });
       window.location.href = '/login';
     }
@@ -48,7 +52,6 @@ export const useAuth = create<AuthState>((set) => ({
       localStorage.setItem('quattro_user', JSON.stringify(user));
       set({ user, isLoading: false });
     } catch (error) {
-      // If /auth/me fails but we already have a logged user in state, keep state
       const saved = getInitialUser();
       set({ user: saved, isLoading: false });
     }

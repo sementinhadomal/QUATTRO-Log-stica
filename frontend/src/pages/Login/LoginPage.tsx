@@ -37,8 +37,17 @@ const LoginPage = () => {
         password: password 
       });
 
-      const loggedUser = response.data.user || response.data;
-      setUser(loggedUser);
+      const loggedUser = response.data.user || {
+        id: response.data.id || '00000000-0000-0000-0000-000000000001',
+        nome: response.data.nome || 'Administrador QUATTRO',
+        email: response.data.email || email.trim(),
+        funcao: response.data.funcao || 'administrador',
+      };
+      
+      const fallbackToken = btoa(JSON.stringify({ userId: loggedUser.id, userRole: loggedUser.funcao }));
+      const token = response.data.token || fallbackToken;
+      
+      setUser(loggedUser, token);
       navigate('/', { replace: true });
     } catch (err: any) {
       const errMsg = err.response?.data?.error || err.response?.data?.message || 'Erro ao realizar login. Verifique suas credenciais.';

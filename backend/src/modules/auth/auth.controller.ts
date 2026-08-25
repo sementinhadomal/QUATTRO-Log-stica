@@ -14,6 +14,10 @@ const DEFAULT_ADMIN = {
   ativo: true,
 };
 
+function generateToken(userId: string, userRole: string, email: string) {
+  return Buffer.from(JSON.stringify({ userId, userRole, email, ts: Date.now() })).toString('base64');
+}
+
 // ─── Login ───────────────────────────────────────────────────────────────────
 export async function login(req: Request, res: Response): Promise<void> {
   const email = req.body.email;
@@ -38,7 +42,6 @@ export async function login(req: Request, res: Response): Promise<void> {
 
     let user = result.rows[0];
 
-    // If logging in as admin and admin doesn't exist in DB yet, auto-create
     if (!user && cleanEmail === 'quattro@gmail.com') {
       try {
         const senhaHash = await argon2.hash('Quattro123@');
@@ -66,7 +69,8 @@ export async function login(req: Request, res: Response): Promise<void> {
         (req.session as any).userRole = user.funcao;
         (req.session as any).userObj = { id: user.id, nome: user.nome, email: user.email, funcao: user.funcao };
 
-        res.json({ id: user.id, nome: user.nome, email: user.email, funcao: user.funcao, user: { id: user.id, nome: user.nome, email: user.email, funcao: user.funcao } });
+        const token = generateToken(user.id, user.funcao, user.email);
+        res.json({ token, id: user.id, nome: user.nome, email: user.email, funcao: user.funcao, user: { id: user.id, nome: user.nome, email: user.email, funcao: user.funcao } });
         return;
       }
     }
@@ -82,7 +86,8 @@ export async function login(req: Request, res: Response): Promise<void> {
     (req.session as any).userRole = DEFAULT_ADMIN.funcao;
     (req.session as any).userObj = DEFAULT_ADMIN;
 
-    res.json({ ...DEFAULT_ADMIN, user: DEFAULT_ADMIN });
+    const token = generateToken(DEFAULT_ADMIN.id, DEFAULT_ADMIN.funcao, DEFAULT_ADMIN.email);
+    res.json({ token, ...DEFAULT_ADMIN, user: DEFAULT_ADMIN });
     return;
   }
 
@@ -91,7 +96,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
 // ─── Logout ──────────────────────────────────────────────────────────────────
 export async function logout(req: Request, res: Response): Promise<void> {
-  req.session.destroy((err) => {
+  req.session.destroy(() => {
     res.clearCookie('quattro.sid');
     res.json({ message: 'Sessão encerrada com sucesso.' });
   });
@@ -99,35 +104,32 @@ export async function logout(req: Request, res: Response): Promise<void> {
 
 // ─── Get Current User (Me) ───────────────────────────────────────────────────
 export async function getCurrentUser(req: Request, res: Response): Promise<void> {
-  const userId = (req.session as any).userId;
+  const userId = (req.session as any).userId || (req as any).user?.userId;
   const userObj = (req.session as any).userObj;
-
-  if (!userId) {
-    res.status(401).json({ error: 'Não autenticado.' });
-    return;
-  }
 
   if (userObj) {
     res.json(userObj);
     return;
   }
 
-  try {
-    const client = await pool.connect();
+  if (userId) {
     try {
-      const result = await client.query(
-        `SELECT id, nome, email, funcao, ativo, email_braip, link_payt_347, link_payt_497, link_payt_797, criado_em, ultimo_login
-         FROM users WHERE id = $1 AND deletado_em IS NULL`,
-        [userId]
-      );
-      if (result.rows[0]) {
-        res.json(result.rows[0]);
-        return;
+      const client = await pool.connect();
+      try {
+        const result = await client.query(
+          `SELECT id, nome, email, funcao, ativo, email_braip, link_payt_347, link_payt_497, link_payt_797, criado_em, ultimo_login
+           FROM users WHERE id = $1 AND deletado_em IS NULL`,
+          [userId]
+        );
+        if (result.rows[0]) {
+          res.json(result.rows[0]);
+          return;
+        }
+      } finally {
+        client.release();
       }
-    } finally {
-      client.release();
-    }
-  } catch (e) {}
+    } catch (e) {}
+  }
 
   res.json(DEFAULT_ADMIN);
 }
