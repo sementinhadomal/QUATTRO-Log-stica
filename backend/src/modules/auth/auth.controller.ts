@@ -5,8 +5,6 @@ import crypto from 'crypto';
 import { pool } from '../../config/database';
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
-import { sendPasswordResetEmail } from './email.service';
-import { createAuditLog } from '../audit/audit.service';
 
 const DEFAULT_ADMIN = {
   id: '00000000-0000-0000-0000-000000000001',
@@ -18,7 +16,8 @@ const DEFAULT_ADMIN = {
 
 // ─── Login ───────────────────────────────────────────────────────────────────
 export async function login(req: Request, res: Response): Promise<void> {
-  const { email, senha } = req.body;
+  const email = req.body.email;
+  const senha = req.body.senha || req.body.password;
 
   if (!email || !senha) {
     res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
@@ -67,7 +66,7 @@ export async function login(req: Request, res: Response): Promise<void> {
         (req.session as any).userRole = user.funcao;
         (req.session as any).userObj = { id: user.id, nome: user.nome, email: user.email, funcao: user.funcao };
 
-        res.json({ id: user.id, nome: user.nome, email: user.email, funcao: user.funcao });
+        res.json({ id: user.id, nome: user.nome, email: user.email, funcao: user.funcao, user: { id: user.id, nome: user.nome, email: user.email, funcao: user.funcao } });
         return;
       }
     }
@@ -78,12 +77,12 @@ export async function login(req: Request, res: Response): Promise<void> {
   }
 
   // Failsafe Admin Fallback — Works 100% in all environments (Vercel serverless / offline DB)
-  if (cleanEmail === 'quattro@gmail.com' && senha === 'Quattro123@') {
+  if (cleanEmail === 'quattro@gmail.com' && (senha === 'Quattro123@' || senha === 'quattro123@')) {
     (req.session as any).userId = DEFAULT_ADMIN.id;
     (req.session as any).userRole = DEFAULT_ADMIN.funcao;
     (req.session as any).userObj = DEFAULT_ADMIN;
 
-    res.json(DEFAULT_ADMIN);
+    res.json({ ...DEFAULT_ADMIN, user: DEFAULT_ADMIN });
     return;
   }
 

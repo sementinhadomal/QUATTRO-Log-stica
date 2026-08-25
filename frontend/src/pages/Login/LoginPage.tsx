@@ -25,11 +25,18 @@ const LoginPage = () => {
     setIsLoading(true);
     
     try {
-      const response = await api.post('/auth/login', { email, password });
-      setUser(response.data.user);
+      const response = await api.post('/auth/login', { 
+        email: email.trim(), 
+        senha: password,
+        password: password 
+      });
+
+      const loggedUser = response.data.user || response.data;
+      setUser(loggedUser);
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Erro ao realizar login. Verifique suas credenciais.');
+      const errMsg = err.response?.data?.error || err.response?.data?.message || 'Erro ao realizar login. Verifique suas credenciais.';
+      setError(errMsg);
     } finally {
       setIsLoading(false);
     }
