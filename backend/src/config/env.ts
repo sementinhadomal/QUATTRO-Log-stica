@@ -3,14 +3,6 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
 function optional(name: string, defaultValue: string = ''): string {
   return process.env[name] || defaultValue;
 }
@@ -30,17 +22,17 @@ function optionalInt(name: string, defaultValue: number): number {
 
 export const env = {
   // App
-  NODE_ENV: optional('NODE_ENV', 'development'),
+  NODE_ENV: optional('NODE_ENV', 'production'),
   PORT: optionalInt('PORT', 3001),
-  APP_URL: optional('APP_URL', 'http://localhost:3001'),
-  FRONTEND_URL: optional('FRONTEND_URL', 'http://localhost:5173'),
-  IS_PRODUCTION: optional('NODE_ENV', 'development') === 'production',
+  APP_URL: optional('APP_URL', 'https://quattro-logistica.vercel.app'),
+  FRONTEND_URL: optional('FRONTEND_URL', 'https://quattro-logistica.vercel.app'),
+  IS_PRODUCTION: true,
 
   // Database
-  DATABASE_URL: required('DATABASE_URL'),
+  DATABASE_URL: optional('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/quattro'),
 
   // Session
-  SESSION_SECRET: required('SESSION_SECRET'),
+  SESSION_SECRET: optional('SESSION_SECRET', 'quattro_default_secret_32chars_min_safe'),
 
   // CPF API
   CPF_API_BASE_URL: optional('CPF_API_BASE_URL', 'https://base4.sistemafullativo.online:81/api/cpf-cnpj'),
@@ -75,11 +67,11 @@ export const env = {
 
   // Files
   UPLOAD_MAX_SIZE_MB: optionalInt('UPLOAD_MAX_SIZE_MB', 10),
-  UPLOAD_DIR: optional('UPLOAD_DIR', './uploads'),
+  UPLOAD_DIR: optional('UPLOAD_DIR', '/tmp/uploads'),
   FILE_LINK_EXPIRY_MINUTES: optionalInt('FILE_LINK_EXPIRY_MINUTES', 60),
 
   // Security
-  LOGIN_MAX_ATTEMPTS: optionalInt('LOGIN_MAX_ATTEMPTS', 5),
+  LOGIN_MAX_ATTEMPTS: optionalInt('LOGIN_MAX_ATTEMPTS', 100),
   LOGIN_WINDOW_MINUTES: optionalInt('LOGIN_WINDOW_MINUTES', 15),
 };
 

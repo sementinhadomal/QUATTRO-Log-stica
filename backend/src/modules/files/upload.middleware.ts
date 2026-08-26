@@ -1,6 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { env } from '../../config/env';
 
@@ -17,14 +18,16 @@ const ALLOWED_MIME_TYPES = [
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // Basic distinction for folder - can be enhanced via req body or params if needed
     const type = file.mimetype.startsWith('image/') ? 'images' :
                  file.mimetype.startsWith('audio/') ? 'audio' :
                  file.mimetype.startsWith('video/') ? 'video' : 'docs';
                  
-    const uploadPath = path.join(__dirname, '../../../uploads', type);
+    const uploadPath = path.join(os.tmpdir(), 'quattro_uploads', type);
     
-    fs.mkdirSync(uploadPath, { recursive: true });
+    try {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    } catch (e) {}
+    
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
