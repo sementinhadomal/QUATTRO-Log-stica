@@ -7,9 +7,9 @@ export async function getProducts(req: Request, res: Response) {
     const result = await pool.query('SELECT * FROM products ORDER BY nome ASC');
     const kitsRes = await pool.query('SELECT * FROM kits WHERE ativo = TRUE ORDER BY ordem ASC');
     
-    const products = result.rows.map(p => ({
+    const products = result.rows.map((p: any) => ({
       ...p,
-      kits: kitsRes.rows.filter(k => k.produto_id === p.id)
+      kits: kitsRes.rows.filter((k: any) => k.produto_id === p.id)
     }));
 
     res.json(products);
