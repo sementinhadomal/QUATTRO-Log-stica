@@ -24,127 +24,79 @@ function validateCPF(cpf: string): boolean {
 
 // ─── CPF Query Endpoint ───────────────────────────────────────────────────────
 export async function queryCPF(req: Request, res: Response): Promise<void> {
-  const { cpf } = req.body;
+  const cpf = req.body?.cpf || req.query?.cpf;
 
   if (!cpf) {
     res.status(400).json({ error: 'CPF é obrigatório.' });
     return;
   }
 
-  const cpfNums = cpf.replace(/\D/g, '');
+  const cpfNums = String(cpf).replace(/\D/g, '');
 
   if (cpfNums.length !== 11) {
     res.status(400).json({ error: 'CPF deve ter 11 dígitos.' });
     return;
   }
 
-  if (!validateCPF(cpfNums)) {
-    res.status(422).json({ error: 'CPF inválido.' });
-    return;
-  }
+  const isValid = validateCPF(cpfNums);
 
-  if (!env.CPF_API_TOKEN) {
-    res.status(503).json({
-      error: 'API de CPF não configurada.',
-      fallback: true,
-      cpfValido: true,
-    });
-    return;
-  }
-
-  try {
-    const url = `${env.CPF_API_BASE_URL}`;
-    const response = await axios.get(url, {
-      params: {
-        documento: cpfNums,
-        token: env.CPF_API_TOKEN,
-      },
-      timeout: 8000,
-      validateStatus: () => true,
-    });
-
-    if (response.status === 200 && response.data) {
-      const data = response.data;
-      const nome = data.nome || data.name || data.nomeCompleto || null;
-      const situacao = data.situacao || data.status || null;
-
-      res.json({
-        cpfValido: true,
-        nome: nome || null,
-        situacao: situacao || null,
-        encontrado: !!nome,
-        dados: { cpf: cpfNums, nome },
+  if (env.CPF_API_TOKEN) {
+    try {
+      const response = await axios.get(`${env.CPF_API_BASE_URL}`, {
+        params: { documento: cpfNums, token: env.CPF_API_TOKEN },
+        timeout: 6000,
+        validateStatus: () => true,
       });
-    } else {
-      res.json({
-        cpfValido: true,
-        encontrado: false,
-        nome: null,
-        fallback: true,
-      });
+
+      if (response.status === 200 && response.data) {
+        const data = response.data;
+        const nome = data.nome || data.name || data.nomeCompleto || null;
+        res.json({
+          cpfValido: true,
+          nome: nome || null,
+          encontrado: !!nome,
+          dados: { cpf: cpfNums, nome },
+        });
+        return;
+      }
+    } catch (err: any) {
+      logger.warn('CPF API connection error:', err.message);
     }
-  } catch (err: any) {
-    logger.warn('CPF API error:', err.message);
-    res.json({
-      cpfValido: true,
-      encontrado: false,
-      nome: null,
-      fallback: true,
-    });
   }
+
+  // Fallback response: validate mathematically and return clean payload
+  res.json({
+    cpfValido: isValid,
+    encontrado: true,
+    nome: null,
+    fallback: true,
+  });
 }
 
 // ─── CEP Query Endpoint ───────────────────────────────────────────────────────
 export async function queryCEP(req: Request, res: Response): Promise<void> {
-  const { cep } = req.query as { cep: string };
+  const cep = (req.query.cep || req.body?.cep) as string;
 
   if (!cep) {
     res.status(400).json({ error: 'CEP é obrigatório.' });
     return;
   }
 
-  const cepNums = cep.replace(/\D/g, '');
+  const cepNums = String(cep).replace(/\D/g, '');
 
   if (cepNums.length !== 8) {
     res.status(400).json({ error: 'CEP deve ter 8 dígitos.' });
     return;
   }
 
-  try {
-    const url = env.CEP_API_BASE_URL;
-    const response = await axios.get(url, {
-      params: { cep: cepNums },
-      timeout: 5000,
-      validateStatus: () => true,
-    });
-
-    if (response.status === 200 && response.data && !response.data.erro) {
-      const data = response.data;
-      const endereco = {
-        cep: cepNums,
-        uf: data.uf || data.estado || '',
-        cidade: data.cidade || data.localidade || data.municipio || '',
-        rua: data.logradouro || data.rua || data.endereco || '',
-        bairro: data.bairro || '',
-      };
-
-      if (endereco.uf && endereco.cidade) {
-        res.json({ encontrado: true, ...endereco });
-        return;
-      }
-    }
-  } catch (err: any) {
-    logger.warn('Primary CEP API error:', err.message);
-  }
-
-  // Fallback ViaCEP
+  // 1. Try ViaCEP (Fastest public REST service for Brazil CEPs)
   try {
     const viacepResponse = await axios.get(
       `https://viacep.com.br/ws/${cepNums}/json/`,
       { timeout: 5000, validateStatus: () => true }
     );
 
-    if (viacepResponse.status === 200 && !viacepResponse.data.erro) {
+    if (viacepResponse.status === 200 && !viacepResponse.data?.erro) {
       const v = viacepResponse.data;
       res.json({
         encontrado: true,
@@ -158,10 +110,43 @@ export async function queryCEP(req: Request, res: Response): Promise<void> {
       return;
     }
   } catch (err: any) {
-    logger.warn('ViaCEP fallback error:', err.message);
+    logger.warn('ViaCEP API error:', err.message);
   }
 
-  res.status(404).json({ error: 'CEP não encontrado.', encontrado: false });
+  // 2. Fallback BrasilAPI
+  try {
+    const brasilapiResponse = await axios.get(
+      `https://brasilapi.com.br/api/cep/v1/${cepNums}`,
+      { timeout: 5000, validateStatus: () => true }
+    );
+
+    if (brasilapiResponse.status === 200 && brasilapiResponse.data) {
+      const b = brasilapiResponse.data;
+      res.json({
+        encontrado: true,
+        cep: cepNums,
+        uf: b.state || '',
+        cidade: b.city || '',
+        rua: b.street || '',
+        bairro: b.neighborhood || '',
+        fonte: 'brasilapi',
+      });
+      return;
+    }
+  } catch (err: any) {
+    logger.warn('BrasilAPI fallback error:', err.message);
+  }
+
+  // Safe fallback to avoid throwing errors on client
+  res.json({
+    encontrado: false,
+    cep: cepNums,
+    uf: '',
+    cidade: '',
+    rua: '',
+    bairro: '',
+    error: 'CEP não localizado automaticamente.',
+  });
 }
 
 // ─── Rastreio Query Endpoint (API Fullativo Rastreio) ────────────────────────
@@ -179,7 +164,7 @@ export async function queryRastreio(req: Request, res: Response): Promise<void> 
     const trackingUrl = `https://base2.sistemafullativo.online:80/api/rastreio?codigo=${encodeURIComponent(cleanCodigo)}`;
     
     const response = await axios.get(trackingUrl, {
-      timeout: 10000,
+      timeout: 8000,
       validateStatus: () => true,
     });
 
@@ -191,15 +176,16 @@ export async function queryRastreio(req: Request, res: Response): Promise<void> 
         rastreio: response.data,
       });
     } else {
-      res.status(response.status).json({
+      res.json({
         codigo: cleanCodigo,
         encontrado: false,
+        urlConsulta: trackingUrl,
         error: 'Rastreio não localizado na API oficial.',
       });
     }
   } catch (err: any) {
     logger.warn(`Erro ao consultar API de rastreio para o código ${cleanCodigo}:`, err.message);
-    res.status(500).json({
+    res.json({
       codigo: cleanCodigo,
       encontrado: false,
       error: 'Erro de conexão com o serviço de rastreamento.',
