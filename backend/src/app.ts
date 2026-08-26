@@ -1,9 +1,7 @@
 import express from 'express';
 import session from 'express-session';
-import connectPgSimple from 'connect-pg-simple';
 import helmet from 'helmet';
 import cors from 'cors';
-import { pool, testConnection } from './config/database';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import { apiRateLimiter } from './middleware/rateLimiter';
@@ -40,24 +38,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
 
-// Session Store Setup (Failsafe)
-const PgSession = connectPgSimple(session);
-let sessionStore: any;
-
-try {
-  sessionStore = new PgSession({ 
-    pool, 
-    tableName: 'sessions', 
-    createTableIfMissing: true,
-    errorLog: (err) => logger.warn('PgSession error (falling back):', err.message)
-  });
-} catch (err) {
-  logger.warn('Using MemoryStore fallback for sessions');
-  sessionStore = new session.MemoryStore();
-}
-
+// Session (Stateless Bearer Tokens + Failsafe MemoryStore)
 app.use(session({
-  store: sessionStore,
   name: 'quattro.sid',
   secret: env.SESSION_SECRET || 'quattro_default_secret_32chars_min',
   resave: false,
@@ -97,6 +79,7 @@ app.use('/api/arquivos', filesRoutes);
 
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
